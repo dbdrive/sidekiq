@@ -33,6 +33,9 @@ module Sidekiq # :nodoc:
       @strictly_ordered_queues = cap.mode == :strict
       @queues = config.queues.map { |q| "queue:#{q}" }
       @queues.uniq! if @strictly_ordered_queues
+
+      @queues_names = config.queues.map(&:to_s).join(',')
+      @next_log = Time.now
     end
 
     def retrieve_work
@@ -42,6 +45,16 @@ module Sidekiq # :nodoc:
       if qs.size <= 0
         sleep(TIMEOUT)
         return nil
+      end
+
+      if Time.now > @next_log
+        @next_log = Time.now + 15.seconds
+
+        if @queues_names == 'webhooks'
+          logger.info "Fetching from #{@queues_names}"
+          queue_size = redis { |conn| conn.llen "queue:webhooks" }
+          logger.info "Webhooks queue size: #{queue_size}"
+        end
       end
 
       queue, job = redis { |conn| conn.blocking_call(conn.read_timeout + TIMEOUT, "brpop", *qs, TIMEOUT) }
